@@ -31,7 +31,7 @@ import { coalesce, isNonEmptyArray } from 'vs/base/common/arrays';
 import { RenderLineNumbersType } from 'vs/editor/common/config/editorOptions';
 import { CommandsConverter } from 'vs/workbench/api/common/extHostCommands';
 import { ExtHostNotebookController } from 'vs/workbench/api/common/extHostNotebook';
-import { CellOutputKind, IDisplayOutput, INotebookDecorationRenderOptions } from 'vs/workbench/contrib/notebook/common/notebookCommon';
+import { CellEditType, CellKind, ICellDto2, INotebookDecorationRenderOptions, IOutputDto } from 'vs/workbench/contrib/notebook/common/notebookCommon';
 import { ITestItem, ITestState } from 'vs/workbench/contrib/testing/common/testCollection';
 
 export interface PositionLike {
@@ -546,6 +546,60 @@ export namespace WorkspaceEdit {
 						notebookMetadata: entry.notebookMetadata,
 						notebookVersionId: notebooks?.lookupNotebookDocument(entry.uri)?.notebookDocument.version
 					});
+
+				} else if (entry._type === types.FileEditType.CellOutput) {
+					if (entry.newOutputs) {
+						result.edits.push({
+							_type: extHostProtocol.WorkspaceEditType.Cell,
+							metadata: entry.metadata,
+							resource: entry.uri,
+							edit: {
+								editType: CellEditType.Output,
+								index: entry.index,
+								append: entry.append,
+								outputs: entry.newOutputs.map(NotebookCellOutput.from)
+							}
+						});
+					}
+					// todo@joh merge metadata and output edit?
+					if (entry.newMetadata) {
+						result.edits.push({
+							_type: extHostProtocol.WorkspaceEditType.Cell,
+							metadata: entry.metadata,
+							resource: entry.uri,
+							edit: {
+								editType: CellEditType.Metadata,
+								index: entry.index,
+								metadata: entry.newMetadata
+							}
+						});
+					}
+				} else if (entry._type === types.FileEditType.CellReplace) {
+					result.edits.push({
+						_type: extHostProtocol.WorkspaceEditType.Cell,
+						metadata: entry.metadata,
+						resource: entry.uri,
+						notebookVersionId: notebooks?.lookupNotebookDocument(entry.uri)?.notebookDocument.version,
+						edit: {
+							editType: CellEditType.Replace,
+							index: entry.index,
+							count: entry.count,
+							cells: entry.cells.map(NotebookCellData.from)
+						}
+					});
+				} else if (entry._type === types.FileEditType.CellOutputItem) {
+					result.edits.push({
+						_type: extHostProtocol.WorkspaceEditType.Cell,
+						metadata: entry.metadata,
+						resource: entry.uri,
+						edit: {
+							editType: CellEditType.OutputItems,
+							index: entry.index,
+							outputId: entry.outputId,
+							items: entry.newOutputItems?.map(item => ({ mime: item.mime, value: item.value, metadata: item.metadata })) || [],
+							append: entry.append
+						}
+					});
 				}
 			}
 		}
@@ -1021,6 +1075,7 @@ export namespace InlineHint {
 		return {
 			text: hint.text,
 			range: Range.from(hint.range),
+			kind: InlineHintKind.from(hint.kind ?? types.InlineHintKind.Other),
 			description: hint.description && MarkdownString.fromStrict(hint.description),
 			whitespaceBefore: hint.whitespaceBefore,
 			whitespaceAfter: hint.whitespaceAfter
@@ -1028,13 +1083,24 @@ export namespace InlineHint {
 	}
 
 	export function to(hint: modes.InlineHint): vscode.InlineHint {
-		return new types.InlineHint(
+		const res = new types.InlineHint(
 			hint.text,
 			Range.to(hint.range),
-			htmlContent.isMarkdownString(hint.description) ? MarkdownString.to(hint.description) : hint.description,
-			hint.whitespaceBefore,
-			hint.whitespaceAfter
+			InlineHintKind.to(hint.kind)
 		);
+		res.whitespaceAfter = hint.whitespaceAfter;
+		res.whitespaceBefore = hint.whitespaceBefore;
+		res.description = htmlContent.isMarkdownString(hint.description) ? MarkdownString.to(hint.description) : hint.description;
+		return res;
+	}
+}
+
+export namespace InlineHintKind {
+	export function from(kind: vscode.InlineHintKind): modes.InlineHintKind {
+		return kind;
+	}
+	export function to(kind: modes.InlineHintKind): vscode.InlineHintKind {
+		return kind;
 	}
 }
 
@@ -1278,21 +1344,75 @@ export namespace LanguageSelector {
 	}
 }
 
-export namespace NotebookCellOutput {
-	export function from(output: types.NotebookCellOutput): IDisplayOutput {
-		return output.toJSON();
+export namespace NotebookCellKind {
+	export function from(data: vscode.NotebookCellKind): CellKind {
+		switch (data) {
+			case types.NotebookCellKind.Markdown:
+				return CellKind.Markdown;
+			case types.NotebookCellKind.Code:
+			default:
+				return CellKind.Code;
+		}
+	}
+
+	export function to(data: CellKind): vscode.NotebookCellKind {
+		switch (data) {
+			case CellKind.Markdown:
+				return types.NotebookCellKind.Markdown;
+			case CellKind.Code:
+			default:
+				return types.NotebookCellKind.Code;
+		}
 	}
 }
 
-export namespace NotebookCellOutputItem {
-	export function from(output: types.NotebookCellOutputItem): IDisplayOutput {
+export namespace NotebookCellData {
+
+	export function from(data: vscode.NotebookCellData): ICellDto2 {
 		return {
-			outputKind: CellOutputKind.Rich,
-			data: { [output.mime]: output.value },
-			metadata: output.metadata && { custom: output.metadata }
+			cellKind: NotebookCellKind.from(data.cellKind),
+			language: data.language,
+			source: data.source,
+			metadata: data.metadata,
+			outputs: data.outputs.map(output => ({
+				outputId: output.id, outputs: (output.outputs || []).map(op => ({
+					mime: op.mime,
+					value: op.value,
+					metadata: op.metadata
+				}))
+			}))
 		};
 	}
 }
+
+export namespace NotebookCellOutput {
+	export function from(output: types.NotebookCellOutput): IOutputDto {
+
+		const data = Object.create(null);
+		const custom = Object.create(null);
+
+		for (let item of output.outputs) {
+			data[item.mime] = item.value;
+			custom[item.mime] = item.metadata;
+		}
+
+		return {
+			outputId: output.id,
+			outputs: (output.outputs || []).map(op => ({
+				mime: op.mime,
+				value: op.value,
+				metadata: op.metadata
+			})) || [],
+			// metadata: isEmptyObject(custom) ? undefined : { custom }
+		};
+	}
+
+	export function to(output: IOutputDto): vscode.NotebookCellOutput {
+		const items: types.NotebookCellOutputItem[] = output.outputs.map(op => new types.NotebookCellOutputItem(op.mime, op.value, op.metadata));
+		return new types.NotebookCellOutput(items, output.outputId);
+	}
+}
+
 
 export namespace NotebookExclusiveDocumentPattern {
 	export function from(pattern: { include: vscode.GlobPattern | undefined, exclude: vscode.GlobPattern | undefined }): { include: string | types.RelativePattern | undefined, exclude: string | types.RelativePattern | undefined };
@@ -1380,22 +1500,22 @@ export namespace NotebookDecorationRenderOptions {
 export namespace TestState {
 	export function from(item: vscode.TestState): ITestState {
 		return {
-			runState: item.runState,
+			state: item.state,
 			duration: item.duration,
-			messages: item.messages.map(message => ({
+			messages: item.messages?.map(message => ({
 				message: MarkdownString.fromStrict(message.message) || '',
 				severity: message.severity,
 				expectedOutput: message.expectedOutput,
 				actualOutput: message.actualOutput,
-				location: message.location ? location.from(message.location) : undefined,
-			})),
+				location: message.location ? location.from(message.location) as any : undefined,
+			})) ?? [],
 		};
 	}
 
 	export function to(item: ITestState): vscode.TestState {
-		return new types.TestState(
-			item.runState,
-			item.messages.map(message => ({
+		return {
+			state: item.state,
+			messages: item.messages.map(message => ({
 				message: typeof message.message === 'string' ? message.message : MarkdownString.to(message.message),
 				severity: message.severity,
 				expectedOutput: message.expectedOutput,
@@ -1405,26 +1525,27 @@ export namespace TestState {
 					uri: URI.revive(message.location.uri)
 				}),
 			})),
-			item.duration,
-		);
+			duration: item.duration,
+		};
 	}
 }
 
 
 export namespace TestItem {
-	export function from(item: vscode.TestItem): ITestItem {
+	export function from(item: vscode.TestItem, parentExtId?: string): ITestItem {
 		return {
+			extId: item.id ?? (parentExtId ? `${parentExtId}\0${item.label}` : item.label),
 			label: item.label,
-			location: item.location ? location.from(item.location) : undefined,
+			location: item.location ? location.from(item.location) as any : undefined,
 			debuggable: item.debuggable ?? false,
 			description: item.description,
 			runnable: item.runnable ?? true,
-			state: TestState.from(item.state),
 		};
 	}
 
-	export function to(item: ITestItem): vscode.TestItem {
+	export function toShallow(item: ITestItem): Omit<vscode.RequiredTestItem, 'children'> {
 		return {
+			id: item.extId,
 			label: item.label,
 			location: item.location && location.to({
 				range: item.location.range,
@@ -1433,7 +1554,6 @@ export namespace TestItem {
 			debuggable: item.debuggable,
 			description: item.description,
 			runnable: item.runnable,
-			state: TestState.to(item.state),
 		};
 	}
 }

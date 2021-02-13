@@ -45,7 +45,7 @@ export interface IProductConfiguration {
 	readonly applicationName: string;
 
 	readonly urlProtocol: string;
-	readonly dataFolderName: string;
+	readonly dataFolderName: string; // location for extensions (e.g. ~/.vscode-insiders)
 
 	readonly builtInExtensions?: IBuiltInExtension[];
 
@@ -129,6 +129,8 @@ export interface IProductConfiguration {
 	readonly linkProtectionTrustedDomains?: readonly string[];
 
 	readonly 'configurationSync.store'?: ConfigurationSyncStore;
+
+	readonly darwinUniversalAssetId?: string;
 }
 
 export type ImportantExtensionTip = { name: string; languages?: string[]; pattern?: string; isExtensionPack?: boolean };

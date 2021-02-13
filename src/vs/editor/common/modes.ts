@@ -1439,9 +1439,9 @@ export interface AuthenticationSession {
  * @internal
  */
 export interface AuthenticationSessionsChangeEvent {
-	added: ReadonlyArray<string>;
-	removed: ReadonlyArray<string>;
-	changed: ReadonlyArray<string>;
+	added: ReadonlyArray<AuthenticationSession>;
+	removed: ReadonlyArray<AuthenticationSession>;
+	changed: ReadonlyArray<AuthenticationSession>;
 }
 
 /**
@@ -1659,9 +1659,17 @@ export interface CodeLensProvider {
 	resolveCodeLens?(model: model.ITextModel, codeLens: CodeLens, token: CancellationToken): ProviderResult<CodeLens>;
 }
 
+
+export enum InlineHintKind {
+	Other = 0,
+	Type = 1,
+	Parameter = 2,
+}
+
 export interface InlineHint {
 	text: string;
 	range: IRange;
+	kind: InlineHintKind;
 	description?: string | IMarkdownString;
 	whitespaceBefore?: boolean;
 	whitespaceAfter?: boolean;

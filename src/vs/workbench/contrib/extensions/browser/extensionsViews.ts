@@ -6,7 +6,7 @@
 import { localize } from 'vs/nls';
 import { Disposable, DisposableStore, toDisposable } from 'vs/base/common/lifecycle';
 import { Event, Emitter } from 'vs/base/common/event';
-import { isPromiseCanceledError, getErrorMessage } from 'vs/base/common/errors';
+import { isPromiseCanceledError, getErrorMessage, createErrorWithActions } from 'vs/base/common/errors';
 import { PagedModel, IPagedModel, IPager, DelayedPagedModel } from 'vs/base/common/paging';
 import { SortBy, SortOrder, IQueryOptions } from 'vs/platform/extensionManagement/common/extensionManagement';
 import { IExtensionManagementServer, IExtensionManagementServerService, EnablementState, IWorkbenchExtensioManagementService } from 'vs/workbench/services/extensionManagement/common/extensionManagement';
@@ -35,7 +35,6 @@ import { coalesce, distinct, flatten } from 'vs/base/common/arrays';
 import { IExperimentService, IExperiment, ExperimentActionType } from 'vs/workbench/contrib/experiments/common/experimentService';
 import { alert } from 'vs/base/browser/ui/aria/aria';
 import { IListContextMenuEvent } from 'vs/base/browser/ui/list/list';
-import { createErrorWithActions } from 'vs/base/common/errorsWithActions';
 import { CancellationToken } from 'vs/base/common/cancellation';
 import { IAction, Action, Separator } from 'vs/base/common/actions';
 import { ExtensionIdentifier, IExtensionDescription, isLanguagePackExtension } from 'vs/platform/extensions/common/extensions';
@@ -691,8 +690,14 @@ export class ExtensionsListView extends ViewPane {
 		}
 
 		// All recommendations
-		if (/@recommended:all/i.test(query.value) || ExtensionsListView.isSearchRecommendedExtensionsQuery(query.value)) {
-			return this.getAllRecommendationsModel(query, options, token);
+		if (/@recommended:all/i.test(query.value)) {
+			return this.getAllRecommendationsModel(options, token);
+		}
+
+		// Search recommendations
+		if (ExtensionsListView.isSearchRecommendedExtensionsQuery(query.value) ||
+			(ExtensionsListView.isRecommendedExtensionsQuery(query.value) && options.sortBy !== undefined)) {
+			return this.searchRecommendations(query, options, token);
 		}
 
 		// Other recommendations
@@ -728,10 +733,8 @@ export class ExtensionsListView extends ViewPane {
 	}
 
 	private async getWorkspaceRecommendationsModel(query: Query, options: IQueryOptions, token: CancellationToken): Promise<IPagedModel<IExtension>> {
-		const value = query.value.replace(/@recommended:workspace/g, '').trim().toLowerCase();
 		const recommendations = await this.getWorkspaceRecommendations();
-		const installableRecommendations = (await this.getInstallableRecommendations(recommendations, { ...options, source: 'recommendations-workspace' }, token))
-			.filter(extension => extension.identifier.id.toLowerCase().indexOf(value) > -1);
+		const installableRecommendations = (await this.getInstallableRecommendations(recommendations, { ...options, source: 'recommendations-workspace' }, token));
 		this.telemetryService.publicLog2<{ count: number }, WorkspaceRecommendationsClassification>('extensionWorkspaceRecommendations:open', { count: installableRecommendations.length });
 		const result: IExtension[] = coalesce(recommendations.map(id => installableRecommendations.find(i => areSameExtensions(i.identifier, { id }))));
 		return new PagedModel(result);
@@ -753,14 +756,19 @@ export class ExtensionsListView extends ViewPane {
 	}
 
 	private async getOtherRecommendationsModel(query: Query, options: IQueryOptions, token: CancellationToken): Promise<IPagedModel<IExtension>> {
-		const value = query.value.replace(/@recommended/g, '').trim().toLowerCase();
+		const otherRecommendations = await this.getOtherRecommendations();
+		const installableRecommendations = await this.getInstallableRecommendations(otherRecommendations, { ...options, source: 'recommendations-other', sortBy: undefined }, token);
+		const result = coalesce(otherRecommendations.map(id => installableRecommendations.find(i => areSameExtensions(i.identifier, { id }))));
+		return new PagedModel(result);
+	}
 
+	private async getOtherRecommendations(): Promise<string[]> {
 		const local = (await this.extensionsWorkbenchService.queryLocal(this.options.server))
 			.map(e => e.identifier.id.toLowerCase());
 		const workspaceRecommendations = (await this.getWorkspaceRecommendations())
 			.map(extensionId => extensionId.toLowerCase());
 
-		const otherRecommendations = distinct(
+		return distinct(
 			flatten(await Promise.all([
 				// Order is important
 				this.extensionRecommendationsService.getImportantRecommendations(),
@@ -768,16 +776,10 @@ export class ExtensionsListView extends ViewPane {
 				this.extensionRecommendationsService.getOtherRecommendations()
 			])).filter(extensionId => !local.includes(extensionId.toLowerCase()) && !workspaceRecommendations.includes(extensionId.toLowerCase())
 			), extensionId => extensionId.toLowerCase());
-
-		const installableRecommendations = (await this.getInstallableRecommendations(otherRecommendations, { ...options, source: 'recommendations-other', sortBy: undefined }, token))
-			.filter(extension => extension.identifier.id.toLowerCase().indexOf(value) > -1);
-
-		const result: IExtension[] = coalesce(otherRecommendations.map(id => installableRecommendations.find(i => areSameExtensions(i.identifier, { id }))));
-		return new PagedModel(result);
 	}
 
 	// Get All types of recommendations, trimmed to show a max of 8 at any given time
-	private async getAllRecommendationsModel(query: Query, options: IQueryOptions, token: CancellationToken): Promise<IPagedModel<IExtension>> {
+	private async getAllRecommendationsModel(options: IQueryOptions, token: CancellationToken): Promise<IPagedModel<IExtension>> {
 		const local = (await this.extensionsWorkbenchService.queryLocal(this.options.server)).map(e => e.identifier.id.toLowerCase());
 
 		const allRecommendations = distinct(
@@ -793,6 +795,15 @@ export class ExtensionsListView extends ViewPane {
 		const installableRecommendations = await this.getInstallableRecommendations(allRecommendations, { ...options, source: 'recommendations-all', sortBy: undefined }, token);
 		const result: IExtension[] = coalesce(allRecommendations.map(id => installableRecommendations.find(i => areSameExtensions(i.identifier, { id }))));
 		return new PagedModel(result.slice(0, 8));
+	}
+
+	private async searchRecommendations(query: Query, options: IQueryOptions, token: CancellationToken): Promise<IPagedModel<IExtension>> {
+		const value = query.value.replace(/@recommended/g, '').trim().toLowerCase();
+		const recommendations = distinct([...await this.getWorkspaceRecommendations(), ...await this.getOtherRecommendations()]);
+		const installableRecommendations = (await this.getInstallableRecommendations(recommendations, { ...options, source: 'recommendations', sortBy: undefined }, token))
+			.filter(extension => extension.identifier.id.toLowerCase().indexOf(value) > -1);
+		const result = coalesce(recommendations.map(id => installableRecommendations.find(i => areSameExtensions(i.identifier, { id }))));
+		return new PagedModel(this.sortExtensions(result, options));
 	}
 
 	// Sorts the firstPage of the pager in the same order as given array of extension ids
@@ -949,7 +960,7 @@ export class ExtensionsListView extends ViewPane {
 	}
 
 	static isSearchRecommendedExtensionsQuery(query: string): boolean {
-		return /@recommended/i.test(query) && !ExtensionsListView.isRecommendedExtensionsQuery(query);
+		return /@recommended\s.+/i.test(query);
 	}
 
 	static isWorkspaceRecommendedExtensionsQuery(query: string): boolean {

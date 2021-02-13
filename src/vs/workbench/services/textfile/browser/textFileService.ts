@@ -266,7 +266,7 @@ export abstract class AbstractTextFileService extends Disposable implements ITex
 		// If the source is an existing text file model, we can directly
 		// use that model to copy the contents to the target destination
 		const textFileModel = this.files.get(source);
-		if (textFileModel && textFileModel.isResolved()) {
+		if (textFileModel?.isResolved()) {
 			success = await this.doSaveAsTextFile(textFileModel, source, target, options);
 		}
 
@@ -475,12 +475,14 @@ export abstract class AbstractTextFileService extends Disposable implements ITex
 		if (!languageName) {
 			return untitledName;
 		}
+
 		const extension = this.modeService.getExtensions(languageName)[0];
 		if (extension) {
 			if (!untitledName.endsWith(extension)) {
 				return untitledName + extension;
 			}
 		}
+
 		const filename = this.modeService.getFilenames(languageName)[0];
 		return filename || untitledName;
 	}
@@ -635,7 +637,7 @@ export class EncodingOracle extends Disposable implements IResourceEncodings {
 	}
 
 	private getEncodingOverride(resource: URI): string | undefined {
-		if (this.encodingOverrides && this.encodingOverrides.length) {
+		if (this.encodingOverrides?.length) {
 			for (const override of this.encodingOverrides) {
 
 				// check if the resource is child of encoding override path

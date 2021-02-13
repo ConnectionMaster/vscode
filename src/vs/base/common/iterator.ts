@@ -39,6 +39,18 @@ export namespace Iterable {
 		return false;
 	}
 
+	export function find<T, R extends T>(iterable: Iterable<T>, predicate: (t: T) => t is R): T | undefined;
+	export function find<T>(iterable: Iterable<T>, predicate: (t: T) => boolean): T | undefined;
+	export function find<T>(iterable: Iterable<T>, predicate: (t: T) => boolean): T | undefined {
+		for (const element of iterable) {
+			if (predicate(element)) {
+				return element;
+			}
+		}
+
+		return undefined;
+	}
+
 	export function filter<T, R extends T>(iterable: Iterable<T>, predicate: (t: T) => t is R): Iterable<R>;
 	export function filter<T>(iterable: Iterable<T>, predicate: (t: T) => boolean): Iterable<T>;
 	export function* filter<T>(iterable: Iterable<T>, predicate: (t: T) => boolean): Iterable<T> {
@@ -69,6 +81,14 @@ export namespace Iterable {
 				yield element;
 			}
 		}
+	}
+
+	export function reduce<T, R>(iterable: Iterable<T>, reducer: (previousValue: R, currentValue: T) => R, initialValue: R): R {
+		let value = initialValue;
+		for (const element of iterable) {
+			value = reducer(value, element);
+		}
+		return value;
 	}
 
 	/**

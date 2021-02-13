@@ -462,7 +462,7 @@ MenuRegistry.appendMenuItem(MenuId.MenubarAppearanceMenu, {
 	command: {
 		id: ToggleMenuBarAction.ID,
 		title: nls.localize({ key: 'miShowMenuBar', comment: ['&& denotes a mnemonic'] }, "Show Menu &&Bar"),
-		toggled: ContextKeyExpr.and(IsMacNativeContext.toNegated(), ContextKeyExpr.notEquals('config.window.menuBarVisibility', 'hidden'), ContextKeyExpr.notEquals('config.window.menuBarVisibility', 'toggle'))
+		toggled: ContextKeyExpr.and(IsMacNativeContext.toNegated(), ContextKeyExpr.notEquals('config.window.menuBarVisibility', 'hidden'), ContextKeyExpr.notEquals('config.window.menuBarVisibility', 'toggle'), ContextKeyExpr.notEquals('config.window.menuBarVisibility', 'compact'))
 	},
 	when: IsMacNativeContext.toNegated(),
 	order: 0
@@ -488,36 +488,6 @@ export class ResetViewLocationsAction extends Action {
 }
 
 registry.registerWorkbenchAction(SyncActionDescriptor.from(ResetViewLocationsAction), 'View: Reset View Locations', CATEGORIES.View.value);
-
-// --- Toggle View with Command
-export class ToggleViewAction extends Action {
-
-	constructor(
-		id: string,
-		label: string,
-		private readonly viewId: string,
-		@IViewsService protected viewsService: IViewsService,
-		@IViewDescriptorService protected viewDescriptorService: IViewDescriptorService,
-		@IContextKeyService protected contextKeyService: IContextKeyService,
-		@IWorkbenchLayoutService private layoutService: IWorkbenchLayoutService,
-	) {
-		super(id, label);
-	}
-
-	async run(): Promise<void> {
-		const focusedViewId = FocusedViewContext.getValue(this.contextKeyService);
-
-		if (focusedViewId === this.viewId) {
-			if (this.viewDescriptorService.getViewLocationById(this.viewId) === ViewContainerLocation.Sidebar) {
-				this.layoutService.setSideBarHidden(true);
-			} else {
-				this.layoutService.setPanelHidden(true);
-			}
-		} else {
-			this.viewsService.openView(this.viewId, true);
-		}
-	}
-}
 
 // --- Move View with Command
 export class MoveViewAction extends Action {
@@ -708,7 +678,7 @@ export class MoveFocusedViewAction extends Action {
 			.map(viewletId => {
 				return {
 					id: viewletId,
-					label: this.viewDescriptorService.getViewContainerById(viewletId)!.name
+					label: this.viewDescriptorService.getViewContainerById(viewletId)!.title
 				};
 			}));
 
@@ -729,7 +699,7 @@ export class MoveFocusedViewAction extends Action {
 			.map(panel => {
 				return {
 					id: panel.id,
-					label: this.viewDescriptorService.getViewContainerById(panel.id)!.name
+					label: this.viewDescriptorService.getViewContainerById(panel.id)!.title
 				};
 			}));
 

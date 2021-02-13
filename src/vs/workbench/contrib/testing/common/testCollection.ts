@@ -5,7 +5,7 @@
 
 import { IMarkdownString } from 'vs/base/common/htmlContent';
 import { URI } from 'vs/base/common/uri';
-import { Location as ModeLocation } from 'vs/editor/common/modes';
+import { Range } from 'vs/editor/common/core/range';
 import { ExtHostTestingResource } from 'vs/workbench/api/common/extHost.protocol';
 import { TestMessageSeverity, TestRunState } from 'vs/workbench/api/common/extHostTypes';
 
@@ -15,45 +15,42 @@ export interface TestIdWithProvider {
 }
 
 /**
- * Request to them main thread to run a set of tests.
+ * Request to the main thread to run a set of tests.
  */
 export interface RunTestsRequest {
 	tests: TestIdWithProvider[];
 	debug: boolean;
+	isAutoRun?: boolean;
 }
 
 /**
  * Request from the main thread to run tests for a single provider.
  */
 export interface RunTestForProviderRequest {
+	runId: string;
 	providerId: string;
 	ids: string[];
 	debug: boolean;
 }
 
 /**
- * Response to a  {@link RunTestsRequest}
+ * Location with a fully-instantiated Range and URI.
  */
-export interface RunTestsResult {
-	// todo
+export interface IRichLocation {
+	range: Range;
+	uri: URI;
 }
-
-export const EMPTY_TEST_RESULT: RunTestsResult = {};
-
-export const collectTestResults = (results: ReadonlyArray<RunTestsResult>) => {
-	return results[0] || {}; // todo
-};
 
 export interface ITestMessage {
 	message: string | IMarkdownString;
 	severity: TestMessageSeverity | undefined;
 	expectedOutput: string | undefined;
 	actualOutput: string | undefined;
-	location: ModeLocation | undefined;
+	location: IRichLocation | undefined;
 }
 
 export interface ITestState {
-	runState: TestRunState;
+	state: TestRunState;
 	duration: number | undefined;
 	messages: ITestMessage[];
 }
@@ -62,13 +59,14 @@ export interface ITestState {
  * The TestItem from .d.ts, as a plain object without children.
  */
 export interface ITestItem {
+	/** ID of the test given by the test provider */
+	extId: string;
 	label: string;
 	children?: never;
-	location: ModeLocation | undefined;
+	location: IRichLocation | undefined;
 	description: string | undefined;
 	runnable: boolean;
 	debuggable: boolean;
-	state: ITestState;
 }
 
 /**
@@ -79,6 +77,14 @@ export interface InternalTestItem {
 	providerId: string;
 	parent: string | null;
 	item: ITestItem;
+}
+
+export interface InternalTestItemWithChildren extends InternalTestItem {
+	children: this[];
+}
+
+export interface InternalTestResults {
+	tests: InternalTestItemWithChildren[];
 }
 
 export const enum TestDiffOpType {
